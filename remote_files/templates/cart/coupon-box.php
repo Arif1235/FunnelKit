@@ -17,7 +17,7 @@ $coupon_heading     = isset( $settings['coupon_heading'] ) ? $settings['coupon_h
     <div class="fkcart-coupon-input-group">
         <input type="text" name="coupon_code" class="fkcart-coupon-input" id="fkcart-coupon-code" placeholder="<?php echo esc_attr( $coupon_placeholder ); ?>" value="" />
         <button type="button" class="fkcart-apply-coupon-btn fkcart-btn-primary" id="fkcart-apply-coupon">
-			<?php echo esc_html( $coupon_button_text ); ?>
+			<?php esc_html_e( 'Apply', 'cart-for-woocommerce' ); ?>
         </button>
     </div>
 
@@ -95,11 +95,18 @@ jQuery(document).ready(function($) {
         border-color: var(--fkcart-primary-bg-color);
     }
     .fkcart-apply-coupon-btn {
-        padding: 0 20px;
+        padding: 0 24px;
         height: 40px;
-        border-radius: 4px;
+        border-radius: 30px;
         font-weight: 600;
         cursor: pointer;
+        border: none;
+        background-color: var(--fkcart-primary-bg-color);
+        color: #fff;
+        transition: opacity 0.2s;
+    }
+    .fkcart-apply-coupon-btn:hover {
+        opacity: 0.9;
     }
     .fkcart-hide {
         display: none;
