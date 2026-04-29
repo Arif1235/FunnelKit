@@ -24,6 +24,9 @@ if ( ! class_exists( '\FKCart\Includes\Front' ) ) {
 		private function __construct() {
 			add_action( 'woocommerce_add_to_cart', [ $this, 'add_to_cart_trigger' ], - 10 );
 			add_action( 'wp', [ $this, 'init_hooks' ] );
+			add_action( 'woocommerce_before_calculate_totals', [ $this, 'auto_apply_available_coupons' ], 10, 1 );
+			add_action( 'woocommerce_removed_coupon', [ $this, 'track_removed_coupon' ] );
+			add_action( 'woocommerce_applied_coupon', [ $this, 'clear_removed_coupon' ] );
 			add_filter( 'fkcart_admin_ajax_args', [ $this, 'append_ajax_parameter' ] );
 
 			/** Disable redirect to cart after adding product */
@@ -307,6 +310,140 @@ if ( ! class_exists( '\FKCart\Includes\Front' ) ) {
 			}
 
 			return $items;
+		}
+
+		/**
+		 * Get all available coupons
+		 *
+		 * @return array
+		 */
+		public function get_available_coupons() {
+			if ( fkcart_is_preview() ) {
+				return [
+					[
+						'code'          => 'SAVE10',
+						'description'   => 'Get 10% off on your order',
+						'amount'        => 10,
+						'discount_type' => 'percent',
+						'is_valid'      => true,
+					],
+					[
+						'code'          => 'FREE_SHIPPING',
+						'description'   => 'Free shipping on all orders',
+						'amount'        => 0,
+						'discount_type' => 'fixed_cart',
+						'is_valid'      => false,
+						'error_message' => 'Spend $20 more to unlock'
+					]
+				];
+			}
+
+			$args = [
+				'posts_per_page' => - 1,
+				'orderby'        => 'title',
+				'order'          => 'asc',
+				'post_type'      => 'shop_coupon',
+				'post_status'    => 'publish',
+			];
+
+			$coupons           = get_posts( $args );
+			$available_coupons = [];
+
+			foreach ( $coupons as $coupon_post ) {
+				$coupon   = new \WC_Coupon( $coupon_post->ID );
+				$is_valid = $coupon->is_valid();
+
+				$available_coupons[] = [
+					'code'          => $coupon->get_code(),
+					'description'   => $coupon->get_description(),
+					'amount'        => $coupon->get_amount(),
+					'discount_type' => $coupon->get_discount_type(),
+					'is_valid'      => $is_valid,
+					'error_message' => ! $is_valid ? $coupon->get_error_message() : ''
+				];
+			}
+
+			return $available_coupons;
+		}
+
+		/**
+		 * Track manually removed coupons
+		 *
+		 * @param $coupon_code
+		 */
+		public function track_removed_coupon( $coupon_code ) {
+			if ( is_null( WC()->session ) ) {
+				return;
+			}
+			$removed_coupons = (array) WC()->session->get( 'fkcart_removed_coupons', [] );
+			if ( ! in_array( $coupon_code, $removed_coupons ) ) {
+				$removed_coupons[] = $coupon_code;
+				WC()->session->set( 'fkcart_removed_coupons', $removed_coupons );
+			}
+		}
+
+		/**
+		 * Clear removed coupon tracking if applied manually
+		 *
+		 * @param $coupon_code
+		 */
+		public function clear_removed_coupon( $coupon_code ) {
+			if ( is_null( WC()->session ) ) {
+				return;
+			}
+			$removed_coupons = (array) WC()->session->get( 'fkcart_removed_coupons', [] );
+			if ( ( $key = array_search( $coupon_code, $removed_coupons ) ) !== false ) {
+				unset( $removed_coupons[ $key ] );
+				WC()->session->set( 'fkcart_removed_coupons', $removed_coupons );
+			}
+		}
+
+		/**
+		 * Auto apply available coupons
+		 *
+		 * @param $cart
+		 */
+		public function auto_apply_available_coupons( $cart ) {
+			if ( is_admin() && ! wp_doing_ajax() ) {
+				return;
+			}
+
+			if ( ! $cart instanceof \WC_Cart ) {
+				return;
+			}
+
+			// We only want to auto-apply if the cart is not empty
+			if ( $cart->is_empty() ) {
+				return;
+			}
+
+			$coupons = $this->get_available_coupons();
+			if ( empty( $coupons ) ) {
+				return;
+			}
+
+			$removed_coupons = is_null( WC()->session ) ? [] : (array) WC()->session->get( 'fkcart_removed_coupons', [] );
+
+			foreach ( $coupons as $coupon_data ) {
+				$code   = $coupon_data['code'];
+
+				// Skip if manually removed
+				if ( in_array( $code, $removed_coupons ) ) {
+					continue;
+				}
+
+				$coupon = new \WC_Coupon( $code );
+
+				// Check if it's already applied
+				if ( $cart->has_discount( $code ) ) {
+					continue;
+				}
+
+				// Apply it if valid
+				if ( $coupon->is_valid() ) {
+					$cart->add_discount( $code );
+				}
+			}
 		}
 
 		/**
